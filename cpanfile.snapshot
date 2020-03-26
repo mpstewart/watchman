@@ -423,14 +423,6 @@ DISTRIBUTIONS
       ExtUtils::MakeMaker 0
       Test::More 0
       perl 5.006
-  Scope-Guard-0.21
-    pathname: C/CH/CHOCOLATE/Scope-Guard-0.21.tar.gz
-    provides:
-      Scope::Guard 0.21
-    requirements:
-      ExtUtils::MakeMaker 0
-      Test::More 0
-      perl 5.006001
   Sub-Exporter-Progressive-0.001013
     pathname: F/FR/FREW/Sub-Exporter-Progressive-0.001013.tar.gz
     provides:
