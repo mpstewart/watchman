@@ -2,7 +2,6 @@
 use strict;
 use warnings;
 use utf8;
-use v5.30.0;
 
 use autodie qw( open close );
 
@@ -26,7 +25,7 @@ my $CMD = do {
 sub main {
   my $cwd = getcwd;
 
-  say "Q to quit. R to run command again.";
+  print "Q to quit. R to run command again.\n";
 
   my $file_notifier = AnyEvent::Filesys::Notify->new(
     dirs         => [ $cwd ],
