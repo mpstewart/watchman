@@ -10,7 +10,6 @@ use autodie qw( open close );
 use FindBin;
 use lib "$FindBin::Bin/../local/lib/perl5";
 
-use AnyEvent::Loop;
 use AnyEvent::Filesys::Notify;
 use AnyEvent::TermKey;
 use AnyEvent;
@@ -41,7 +40,7 @@ sub main {
 
   # let's do this once right off the bat
   run_command();
-  AnyEvent::Loop::run();
+  AnyEvent->condvar->recv;
 }
 
 sub run_command {
