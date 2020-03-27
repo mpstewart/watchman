@@ -23,19 +23,17 @@ my $CMD = do {
   join " ", @ARGV;
 };
 
-sub main;
-main();
 sub main {
   my $cwd = getcwd;
 
   say "Q to quit. R to run command again.";
 
-	my $file_notifier = AnyEvent::Filesys::Notify->new(
-			dirs         => [ $cwd ],
-			filter       => qr{\.(?:pm|pl|t)$},
-			cb           => \&forky,
-			parse_events => 1,  # Improves efficiency on certain platforms
-	);
+  my $file_notifier = AnyEvent::Filesys::Notify->new(
+    dirs         => [ $cwd ],
+    filter       => qr{\.(?:pm|pl|t)$},
+    cb           => \&forky,
+    parse_events => 1,  # Improves efficiency on certain platforms
+  );
 
   my $key_notifier = AnyEvent::TermKey->new(
     on_key => \&handle_keypress,
@@ -43,16 +41,15 @@ sub main {
 
   # let's do this once right off the bat
   run_command();
-
-	AnyEvent::Loop::run();
+  AnyEvent::Loop::run();
 }
 
 sub forky {
-	my $parent = fork();
+  my $parent = fork();
 
-	if ($parent) {
-		wait;
-		return;
+  if ($parent) {
+    wait;
+    return;
   }
 
   else {
@@ -97,17 +94,19 @@ TEMPLATE
 
 my $cv = AnyEvent->condvar;
 sub handle_keypress {
-	my ( $key ) = @_;
+  my ($key) = @_;
 
-	my $letter = $key->termkey->format_key( $key, FORMAT_VIM );
+  my $letter = $key->termkey->format_key( $key, FORMAT_VIM );
 
-	switch: for ($letter) {
-		/q/ && do { exit 0              };
-		/r/ && do { run_command()       };
-	}
+  switch: for ($letter) {
+    /q/ && do { exit 0              };
+    /r/ && do { run_command()       };
+  }
 
-	# respect ctrl-c
-	$cv->send if $key->type_is_unicode and
-							 $key->utf8 eq "C" and
-							 $key->modifiers & KEYMOD_CTRL;
+  # respect ctrl-c
+  $cv->send if $key->type_is_unicode and
+               $key->utf8 eq "C" and
+               $key->modifiers & KEYMOD_CTRL;
 }
+
+main();
