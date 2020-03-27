@@ -31,7 +31,7 @@ sub main {
   my $file_notifier = AnyEvent::Filesys::Notify->new(
     dirs         => [ $cwd ],
     filter       => qr{\.(?:pm|pl|t)$},
-    cb           => \&forky,
+    cb           => \&run_command,
     parse_events => 1,  # Improves efficiency on certain platforms
   );
 
@@ -42,19 +42,6 @@ sub main {
   # let's do this once right off the bat
   run_command();
   AnyEvent::Loop::run();
-}
-
-sub forky {
-  my $parent = fork();
-
-  if ($parent) {
-    wait;
-    return;
-  }
-
-  else {
-    run_command(@_);
-  }
 }
 
 sub run_command {
