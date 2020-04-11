@@ -11,10 +11,12 @@ use FindBin;
 use lib "$FindBin::Bin/../local/lib/perl5";
 
 use AnyEvent::Filesys::Notify;
-use AnyEvent::TermKey;
 use AnyEvent;
 use Capture::Tiny qw( capture_merged );
 use Cwd;
+use IO::Handle;
+use POSIX ":sys_wait_h";
+use Scalar::Util qw( openhandle );
 use Term::ANSIColor qw( :constants );
 
 my $CMD = do {
@@ -22,6 +24,7 @@ my $CMD = do {
   join " ", @ARGV;
 };
 
+my $runner_chan = AnyEvent->condvar;
 sub main {
   my $cwd = getcwd;
 
@@ -30,69 +33,94 @@ sub main {
   my $file_notifier = AnyEvent::Filesys::Notify->new(
     dirs         => [ $cwd ],
     filter       => qr{\.(?:pm|pl|t)$},
-    cb           => \&run_command,
+    cb           => \&handle,
     parse_events => 1,  # Improves efficiency on certain platforms
   );
 
-  my $key_notifier = AnyEvent::TermKey->new(
-    on_key => \&handle_keypress,
-  );
-
-  # let's do this once right off the bat
-  run_command();
   AnyEvent->condvar->recv;
 }
 
-sub run_command {
+# handle will handle events, but also the lifecycles of our child processes;
+# upon receiving a file write event:
+# 1) Any existing children will be sent the INT signal, which they may catch and
+#    use to clean up any in-progress work they may have going. Handle will wait
+#    for any existing children to exit before we spawn new children
+# 2) A new child process will be forked, which will run the user's command
+sub handle {
   my $event = shift;
+  return unless $event->is_created;
 
-  # on the initial run, this function is being invoked directly, so we won't
-  # have an event to analyze
-  return if $event && !$event->is_created;
+  state $par = 0; $par++;
 
-  state $par = 0;
-  $par++;
+  # $runner_pid, as a state variable, will cache the PID of any child we create
+  # upon event handling; this allows us to send our children the interrupt
+  # signal, which will cause them to clean up their own children. This also
+  # allows us to perform the necessarily blocking waitpid call
+  state $runner_pid;
+  if ($runner_pid) {
+    kill 'INT', $runner_pid;
+    waitpid $runner_pid, 0;
+  }
 
-  open my $less, '|less -R';
+  # fork, and cache the PID so we can clean it up if we catch an event in the
+  # meantime
+  $runner_pid = fork();
 
-  print_header($less, $par);
+  # if we are the child, then run the user's command
+  run_command($par)
+    unless $runner_pid;
+}
+
+
+# run_command will run the user's command, catching STDOUT and STDERR, then
+# feed that STDOUT and STDERR to an instance of less. run_command runs entirely
+# as a child process, so this function installs an INT handler, which it will
+# run in response to our parent catching a new file write event.
+sub run_command {
+  my $par = shift;
 
   my $merged = capture_merged {
-    # script is some magic to make colors work
+    # script is some magic to make colors work on some platforms
     system(qq(script --quiet -c "$CMD" /dev/null));
   };
 
-  print $less $merged;
-  close $less;
-}
+  my $less_fh;
+  my $less_pid = open $less_fh, "|less -KR";
+  if ($less_pid) {
+    $SIG{INT} = sub {
+      kill 'KILL', $less_pid;
+      waitpid $less_pid, 0;
+      system('clear');
+      exit 0;
+    };
 
-sub print_header {
-  my ($fh, $par) = @_;
-
-  print $fh GREEN "#" x 50;
-  print $fh sprintf("\n".<<TEMPLATE, $CMD, $par);
-# cmd: %s
-# par: %d
-TEMPLATE
-  print $fh GREEN "#" x 50;
-  print $fh "\n";
-}
-
-my $cv = AnyEvent->condvar;
-sub handle_keypress {
-  my ($key) = @_;
-
-  my $letter = $key->termkey->format_key( $key, FORMAT_VIM );
-
-  switch: for ($letter) {
-    /q/ && do { exit 0              };
-    /r/ && do { run_command()       };
+    print $less_fh header($par);
+    print $less_fh $merged;
   }
 
-  # respect ctrl-c
-  $cv->send if $key->type_is_unicode and
-               $key->utf8 eq "C" and
-               $key->modifiers & KEYMOD_CTRL;
+  else {
+    # we're in the child process that's running less; just die if it finishes,
+    # our parent will reap us
+    exit 0;
+  }
+}
+
+sub header {
+  my ( $par) = @_;
+
+  my $header = sprintf(<<TEMPLATE,
+%s
+# cmd: %s
+# par: %d
+%s
+TEMPLATE
+    join(("-") x 60),
+    $CMD,
+    $par,
+    join(("-") x 60),
+  );
+
+  return $header;
 }
 
 main();
