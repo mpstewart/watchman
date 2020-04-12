@@ -27,6 +27,7 @@ my $CMD = do {
 my $runner_chan = AnyEvent->condvar;
 sub main {
   my $cwd = getcwd;
+  say "Watching $cwd...";
 
   print "Q to quit. R to run command again.\n";
 
@@ -36,6 +37,8 @@ sub main {
     cb           => \&handle,
     parse_events => 1,  # Improves efficiency on certain platforms
   );
+
+  handle();
 
   AnyEvent->condvar->recv;
 }
@@ -48,7 +51,7 @@ sub main {
 # 2) A new child process will be forked, which will run the user's command
 sub handle {
   my $event = shift;
-  return unless $event->is_created;
+  return unless !defined($event) || $event->is_created;
 
   state $par = 0; $par++;
 
