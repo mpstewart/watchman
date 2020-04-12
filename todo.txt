@@ -1,2 +1,3 @@
 - Use a streaming approach to handling user command output
 - Figure out a more portable way to handle colors
+- More filetypes

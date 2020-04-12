@@ -14,26 +14,55 @@ use AnyEvent::Filesys::Notify;
 use AnyEvent;
 use Capture::Tiny qw( capture_merged );
 use Cwd;
+use Data::Dump qw( ddx );
+use Getopt::Long;
 use IO::Handle;
 use POSIX ":sys_wait_h";
 use Scalar::Util qw( openhandle );
 use Term::ANSIColor qw( :constants );
 
-my $CMD = do {
-  shift @ARGV if $ARGV[0] eq '--';
-  join " ", @ARGV;
-};
+my $WATCHED_DIR = cwd;
 
-my $runner_chan = AnyEvent->condvar;
+# initialized in parse_opts
+my $CMD;
+my %OPTS;
+
+# initialized in get_filter
+my $FILETYPE;
+
 sub main {
-  my $cwd = getcwd;
-  say "Watching $cwd...";
+  parse_opts();
+  start_watch();
+}
 
-  print "Q to quit. R to run command again.\n";
+# everything up to the first instance of ' -- ' is processed as args to the
+# watchman; everything after that is processed as the user's command
+sub parse_opts {
+  my $arg_string = join " ", @ARGV;
+  $arg_string =~ /^(?<args>.*?) ?-- (?<cmd>.*)$/;
+  my $args = $+{args};
+  my $cmd  = $+{cmd};
 
+  die_usage() unless $cmd;
+
+  @ARGV = split ' ', $args;
+  $CMD  = $cmd;
+
+  GetOptions(\%OPTS,
+    'filetype|f=s',
+  ); foreach my $ugly (sort keys %OPTS) {
+    my $pretty = $ugly;
+    next unless $pretty =~ s/-/_/g;
+    $OPTS{$pretty} = $OPTS{$ugly};
+  }
+
+  ddx \%OPTS if $ENV{DEBUG_OPTS};
+}
+
+sub start_watch {
   my $file_notifier = AnyEvent::Filesys::Notify->new(
-    dirs         => [ $cwd ],
-    filter       => qr{\.(?:pm|pl|t)$},
+    dirs         => [ $WATCHED_DIR ],
+    filter       => get_filter(),
     cb           => \&handle,
     parse_events => 1,  # Improves efficiency on certain platforms
   );
@@ -41,6 +70,28 @@ sub main {
   handle();
 
   AnyEvent->condvar->recv;
+}
+
+sub get_filter {
+  my $filetype = $OPTS{filetype} // 'perl';
+  $FILETYPE = $filetype;
+  my %filters = (
+    perl => [qw( pm pl t )],
+    c    => [qw( c       )],
+    go   => [qw( go      )],
+    json => [qw( json    )],
+    js   => [qw( js      )],
+    yaml => [qw( yml     )],
+    go   => [qw( go      )],
+  );
+
+  my $endings = $filters{$filetype};
+  die "No support for file type $filetype\n" unless $endings;
+
+  my $ending_tree = join "|", @$endings;
+
+  my $filter = qr{\.(?:$ending_tree)$};
+  return $filter;
 }
 
 # handle will handle events, but also the lifecycles of our child processes;
@@ -76,7 +127,7 @@ sub handle {
 
 
 # run_command will run the user's command, catching STDOUT and STDERR, then
-# feed that STDOUT and STDERR to an instance of less. run_command runs entirely
+# pipe that STDOUT and STDERR to an instance of less. run_command runs entirely
 # as a child process, so this function installs an INT handler, which it will
 # run in response to our parent catching a new file write event.
 sub run_command {
@@ -87,6 +138,7 @@ sub run_command {
     system(qq(script --quiet -c "$CMD" /dev/null));
   };
 
+  system('clear');
   my $less_fh;
   my $less_pid = open $less_fh, "|less -KR";
   if ($less_pid) {
@@ -112,18 +164,33 @@ sub header {
   my ( $par) = @_;
 
   my $header = sprintf(<<TEMPLATE,
-%s
-# cmd: %s
-# par: %d
-%s
+%s%s
+* cmd:  %s
+* dir:  %s
+* type: %s
+* par:  %d
+%s%s
 TEMPLATE
-    join(("-") x 60),
+    '*',
+    join('',("-") x 60),
     $CMD,
+    $WATCHED_DIR,
+    $FILETYPE,
     $par,
-    join(("-") x 60),
+    '*',
+    join('',("-") x 60),
   );
 
   return $header;
+}
+
+sub die_usage {
+  my $usage = 'Usage
+  watchman [--filetype|-f] -- $user_command
+';
+
+  warn $usage;
+  exit 1;
 }
 
 main();
